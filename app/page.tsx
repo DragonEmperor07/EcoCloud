@@ -265,9 +265,7 @@ export default function Page() {
       <main className="relative z-10 px-8 pb-10 grid grid-cols-12 gap-5">
         {/* Left column */}
         <div className="col-span-12 lg:col-span-3 flex flex-col gap-5">
-<<<<<<< HEAD
           <EnvCard />
-=======
           <ControlPanel onDeploy={handleDeploy} isDeploying={isDeploying} />
           <JobStatusCard
             jobId={activeJobId}
@@ -281,7 +279,6 @@ export default function Page() {
               {loadError}
             </div>
           )}
->>>>>>> 35d6c11464127fa7344c8d62f0babe0a4d05fc98
           <NodeList
             nodes={nodes}
             optimalId={optimalId}
