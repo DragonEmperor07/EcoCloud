@@ -329,7 +329,6 @@ export default function Page() {
                 </div>
               </div>
               <div className="glass-soft px-3.5 py-2.5 flex items-center gap-4 pointer-events-auto">
-                <Mini label="Workload" value={activeModel || "—"} mono />
                 <Divider />
                 <Mini
                   label="Routed to"
