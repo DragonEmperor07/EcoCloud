@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timezone
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 from models import JobRecord, JobRequest
 from scheduler import select_datacenter
@@ -12,6 +13,13 @@ from state import InMemoryState
 
 app = FastAPI(title="EcoCloud Scheduler MVP", version="0.1.0")
 state = InMemoryState()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def utc_now_iso() -> str:
@@ -196,4 +204,3 @@ def schedule(job: JobRequest, background_tasks: BackgroundTasks) -> dict:
         "score": decision.score,
         "metric_breakdown": decision.metric_breakdown,
     }
-

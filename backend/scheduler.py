@@ -24,6 +24,12 @@ def _normalize(values: list[float]) -> list[float]:
 
 
 def _priority_weights(priority: str) -> dict[str, float]:
+    if priority == "low_carbon":
+        return {"latency": 0.2, "cost": 0.25, "carbon": 0.45, "load": 0.1}
+    if priority == "low_cost":
+        return {"latency": 0.2, "cost": 0.45, "carbon": 0.25, "load": 0.1}
+    if priority == "balanced":
+        return {"latency": 0.35, "cost": 0.25, "carbon": 0.25, "load": 0.15}
     if priority == "high":
         return {"latency": 0.5, "cost": 0.2, "carbon": 0.2, "load": 0.1}
     if priority == "low":
@@ -98,4 +104,3 @@ def select_datacenter(job: JobRequest, datacenters: list[DataCenter]) -> Optiona
 
     chosen = candidates[best_idx]
     return SchedulingDecision(dc_id=chosen.dc_id, score=round(best_score, 5), metric_breakdown=best_breakdown)
-

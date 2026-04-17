@@ -1,6 +1,3 @@
-// Mock data for the carbon-aware AI workload routing simulation.
-// Latitude / longitude are used to plot the node on the globe.
-
 export type Priority = "low_cost" | "low_carbon" | "balanced";
 
 export type Datacenter = {
@@ -10,78 +7,12 @@ export type Datacenter = {
   country: string;
   lat: number;
   lon: number;
-  // Watts per workload (lower is better)
   power: number;
-  // gCO2 per kWh (lower is better, sourced from a mocked grid intensity API)
   carbonIntensity: number;
-  // $ per workload (lower is better)
   cost: number;
-  // ms (lower is better)
   latency: number;
-  // Primary energy source label, for the node card.
   source: "Hydro" | "Solar" | "Wind" | "Geothermal" | "Mixed" | "Coal-heavy" | "Gas";
 };
-
-export const DATACENTERS: Datacenter[] = [
-  { id: "isl-rkv", city: "Reykjavík",   region: "is-north-1",   country: "Iceland",      lat: 64.13, lon: -21.94, power: 240, carbonIntensity:  28, cost: 0.018, latency: 142, source: "Geothermal" },
-  { id: "nor-osl", city: "Oslo",         region: "no-east-1",    country: "Norway",       lat: 59.91, lon:  10.75, power: 260, carbonIntensity:  41, cost: 0.022, latency: 118, source: "Hydro" },
-  { id: "swe-sto", city: "Stockholm",    region: "eu-north-1",   country: "Sweden",       lat: 59.33, lon:  18.07, power: 270, carbonIntensity:  55, cost: 0.024, latency: 122, source: "Mixed" },
-  { id: "fra-par", city: "Paris",        region: "eu-west-3",    country: "France",       lat: 48.85, lon:   2.35, power: 295, carbonIntensity:  78, cost: 0.029, latency:  96, source: "Mixed" },
-  { id: "deu-fra", city: "Frankfurt",    region: "eu-central-1", country: "Germany",      lat: 50.11, lon:   8.68, power: 305, carbonIntensity: 312, cost: 0.031, latency:  88, source: "Coal-heavy" },
-  { id: "irl-dub", city: "Dublin",       region: "eu-west-1",    country: "Ireland",      lat: 53.35, lon:  -6.26, power: 290, carbonIntensity: 250, cost: 0.027, latency: 102, source: "Wind" },
-  { id: "usa-iad", city: "Virginia",     region: "us-east-1",    country: "United States",lat: 38.95, lon: -77.45, power: 330, carbonIntensity: 380, cost: 0.026, latency:  64, source: "Mixed" },
-  { id: "usa-pdx", city: "Oregon",       region: "us-west-2",    country: "United States",lat: 45.84, lon:-119.70, power: 285, carbonIntensity: 110, cost: 0.024, latency:  72, source: "Hydro" },
-  { id: "can-mtl", city: "Montréal",     region: "ca-central-1", country: "Canada",       lat: 45.50, lon: -73.57, power: 270, carbonIntensity:  35, cost: 0.023, latency:  80, source: "Hydro" },
-  { id: "bra-gru", city: "São Paulo",    region: "sa-east-1",    country: "Brazil",       lat:-23.55, lon: -46.63, power: 320, carbonIntensity:  92, cost: 0.030, latency: 158, source: "Hydro" },
-  { id: "ind-blr", city: "Bengaluru",    region: "ap-south-1",   country: "India",        lat: 12.97, lon:  77.59, power: 360, carbonIntensity: 645, cost: 0.020, latency: 188, source: "Coal-heavy" },
-  { id: "sgp-sin", city: "Singapore",    region: "ap-southeast-1",country: "Singapore",   lat:  1.35, lon: 103.82, power: 340, carbonIntensity: 420, cost: 0.028, latency: 196, source: "Gas" },
-  { id: "jpn-nrt", city: "Tokyo",        region: "ap-northeast-1",country: "Japan",       lat: 35.68, lon: 139.69, power: 325, carbonIntensity: 470, cost: 0.032, latency: 168, source: "Mixed" },
-  { id: "aus-syd", city: "Sydney",       region: "ap-southeast-2",country: "Australia",   lat:-33.87, lon: 151.21, power: 335, carbonIntensity: 510, cost: 0.029, latency: 214, source: "Mixed" },
-  { id: "zaf-cpt", city: "Cape Town",    region: "af-south-1",   country: "South Africa", lat:-33.92, lon:  18.42, power: 350, carbonIntensity: 720, cost: 0.025, latency: 232, source: "Coal-heavy" },
-  { id: "are-dxb", city: "Dubai",        region: "me-central-1", country: "UAE",          lat: 25.20, lon:  55.27, power: 345, carbonIntensity: 480, cost: 0.026, latency: 178, source: "Solar" },
-];
-
-// User origin (mocked) — São Francisco. Used for "naive nearest" baseline.
-export const ORIGIN = { city: "San Francisco", lat: 37.77, lon: -122.42 };
-
-// ───────── Scoring ─────────
-// Score = (Power × Carbon Intensity) + Cost + Latency
-// Lower score = better node
-// Weights are tuned by user priority.
-
-export type Weights = { carbon: number; cost: number; latency: number };
-
-export function weightsFor(priority: Priority): Weights {
-  switch (priority) {
-    case "low_cost":   return { carbon: 0.6, cost: 1.6, latency: 0.9 };
-    case "low_carbon": return { carbon: 1.8, cost: 0.6, latency: 0.7 };
-    case "balanced":   return { carbon: 1.0, cost: 1.0, latency: 1.0 };
-  }
-}
-
-export function rawScore(dc: Datacenter, w: Weights): number {
-  // Normalize power×carbon term to keep components on similar scales.
-  const carbonTerm = (dc.power * dc.carbonIntensity) / 1000; // kWh-ish
-  return carbonTerm * w.carbon + dc.cost * 1000 * w.cost + dc.latency * w.latency;
-}
-
-export function scoreAll(priority: Priority, latencyLimitMs?: number) {
-  const w = weightsFor(priority);
-  return DATACENTERS
-    .filter((dc) => (latencyLimitMs ? dc.latency <= latencyLimitMs : true))
-    .map((dc) => ({ dc, score: rawScore(dc, w) }))
-    .sort((a, b) => a.score - b.score);
-}
-
-export function pickOptimal(priority: Priority, latencyLimitMs?: number) {
-  const ranked = scoreAll(priority, latencyLimitMs);
-  return ranked[0]?.dc ?? null;
-}
-
-// Naive baseline: lowest latency only.
-export function pickBaseline() {
-  return [...DATACENTERS].sort((a, b) => a.latency - b.latency)[0];
-}
 
 export type Decision = {
   optimal: Datacenter;
@@ -95,26 +26,305 @@ export type Decision = {
   costBaseline: number;
 };
 
-export function decide(priority: Priority, latencyLimitMs?: number): Decision {
-  const optimal = pickOptimal(priority, latencyLimitMs) ?? DATACENTERS[0];
-  const baseline = pickBaseline();
+export type JobStatus = "queued" | "scheduled" | "running" | "completed" | "failed";
 
-  // Per-workload emissions in grams CO2: power(W) * 1h ≈ W·h, /1000 → kWh, × gCO2/kWh.
-  const emissionsOptimal = (optimal.power / 1000) * optimal.carbonIntensity;
-  const emissionsBaseline = (baseline.power / 1000) * baseline.carbonIntensity;
+export type JobSnapshot = {
+  jobId: string;
+  status: JobStatus;
+  assignedDc: string | null;
+  runtimeS: number | null;
+  energyKwh: number | null;
+  carbonKg: number | null;
+  failureReason: string | null;
+};
 
-  const carbonSavings = ((emissionsBaseline - emissionsOptimal) / Math.max(emissionsBaseline, 1)) * 100;
-  const costSavings = ((baseline.cost - optimal.cost) / Math.max(baseline.cost, 1e-6)) * 100;
+export type JobEvent = {
+  eventId: number;
+  eventType: string;
+  timestamp: string;
+  jobId: string | null;
+  status: string | null;
+  assignedDc: string | null;
+  reason: string | null;
+  runtimeS: number | null;
+};
+
+export const ORIGIN = { city: "San Francisco", lat: 37.77, lon: -122.42 };
+
+const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
+
+type BackendDatacenter = {
+  dc_id: string;
+  region: string;
+  latency_ms: number;
+  energy_cost_per_kwh: number;
+  carbon_intensity_gco2_per_kwh: number;
+  total_cpu: number;
+  total_gpu: number;
+  total_ram: number;
+};
+
+type ScheduleResponse = {
+  job_id: string;
+  status: JobStatus;
+  assigned_dc: string;
+  score: number;
+};
+
+type JobResponse = {
+  job: {
+    job_id: string;
+    status: JobStatus;
+    assigned_dc: string | null;
+    runtime_s: number | null;
+    energy_kwh: number | null;
+    carbon_kg: number | null;
+    failure_reason: string | null;
+  };
+};
+
+type EventsResponse = {
+  events: Array<{
+    event_id: number;
+    event_type: string;
+    timestamp: string;
+    payload: {
+      job_id?: string;
+      status?: string;
+      assigned_dc?: string;
+      reason?: string;
+      runtime_s?: number;
+    };
+  }>;
+  last_event_id: number;
+};
+
+const BACKEND_NODE_META: Record<
+  string,
+  Omit<Datacenter, "carbonIntensity" | "cost" | "latency" | "power">
+> = {
+  "dc-us-east": {
+    id: "dc-us-east",
+    city: "Virginia",
+    region: "us-east",
+    country: "United States",
+    lat: 38.95,
+    lon: -77.45,
+    source: "Mixed",
+  },
+  "dc-us-west": {
+    id: "dc-us-west",
+    city: "Oregon",
+    region: "us-west",
+    country: "United States",
+    lat: 45.84,
+    lon: -119.7,
+    source: "Hydro",
+  },
+  "dc-eu-central": {
+    id: "dc-eu-central",
+    city: "Frankfurt",
+    region: "eu-central",
+    country: "Germany",
+    lat: 50.11,
+    lon: 8.68,
+    source: "Mixed",
+  },
+};
+
+const FALLBACK_DATACENTERS: Datacenter[] = [
+  {
+    id: "dc-us-east",
+    city: "Virginia",
+    region: "us-east",
+    country: "United States",
+    lat: 38.95,
+    lon: -77.45,
+    power: 330,
+    carbonIntensity: 410,
+    cost: 0.12,
+    latency: 35,
+    source: "Mixed",
+  },
+  {
+    id: "dc-us-west",
+    city: "Oregon",
+    region: "us-west",
+    country: "United States",
+    lat: 45.84,
+    lon: -119.7,
+    power: 285,
+    carbonIntensity: 290,
+    cost: 0.09,
+    latency: 55,
+    source: "Hydro",
+  },
+  {
+    id: "dc-eu-central",
+    city: "Frankfurt",
+    region: "eu-central",
+    country: "Germany",
+    lat: 50.11,
+    lon: 8.68,
+    power: 305,
+    carbonIntensity: 140,
+    cost: 0.15,
+    latency: 80,
+    source: "Mixed",
+  },
+];
+
+function inferWorkload(model: string) {
+  const m = model.toLowerCase();
+  if (m.includes("opus") || m.includes("gpt-5") || m.includes("70b")) {
+    return { cpu: 8, gpu: 2, ram: 32 };
+  }
+  if (m.includes("sonnet") || m.includes("mini") || m.includes("small")) {
+    return { cpu: 3, gpu: 0, ram: 10 };
+  }
+  return { cpu: 4, gpu: 1, ram: 16 };
+}
+
+function estimateRuntimeS(spec: { cpu: number; gpu: number; ram: number }) {
+  return Math.max(4, Math.min(25, Math.trunc(2 + spec.cpu * 1.4 + spec.gpu * 4 + spec.ram * 0.06)));
+}
+
+function estimateEnergyKwh(spec: { cpu: number; gpu: number; ram: number }, runtimeS: number) {
+  const runtimeH = runtimeS / 3600;
+  const powerFactorKw = 0.25 + 0.08 * spec.cpu + 0.35 * spec.gpu + 0.01 * Math.sqrt(spec.ram);
+  return runtimeH * powerFactorKw;
+}
+
+function buildDecision(nodes: Datacenter[], assignedDcId: string, spec: { cpu: number; gpu: number; ram: number }): Decision {
+  const optimal = nodes.find((n) => n.id === assignedDcId);
+  if (!optimal) {
+    throw new Error("Assigned datacenter was not found in the latest datacenter list.");
+  }
+
+  const baseline = [...nodes].sort((a, b) => a.latency - b.latency)[0];
+  const runtimeS = estimateRuntimeS(spec);
+  const energyKwh = estimateEnergyKwh(spec, runtimeS);
+
+  const emissionsOptimalG = energyKwh * optimal.carbonIntensity;
+  const emissionsBaselineG = energyKwh * baseline.carbonIntensity;
+  const costOptimal = energyKwh * optimal.cost;
+  const costBaseline = energyKwh * baseline.cost;
 
   return {
     optimal,
     baseline,
-    carbonSavingsPct: carbonSavings,
-    costSavingsPct: costSavings,
+    carbonSavingsPct: ((emissionsBaselineG - emissionsOptimalG) / Math.max(emissionsBaselineG, 1)) * 100,
+    costSavingsPct: ((costBaseline - costOptimal) / Math.max(costBaseline, 1e-6)) * 100,
     latencyDeltaMs: optimal.latency - baseline.latency,
-    emissionsOptimalG: emissionsOptimal,
-    emissionsBaselineG: emissionsBaseline,
-    costOptimal: optimal.cost,
-    costBaseline: baseline.cost,
+    emissionsOptimalG,
+    emissionsBaselineG,
+    costOptimal,
+    costBaseline,
   };
 }
+
+function mapBackendDatacenter(dc: BackendDatacenter): Datacenter {
+  const meta = BACKEND_NODE_META[dc.dc_id] ?? {
+    id: dc.dc_id,
+    city: dc.region.toUpperCase(),
+    region: dc.region,
+    country: "Unknown",
+    lat: 0,
+    lon: 0,
+    source: "Mixed" as const,
+  };
+
+  return {
+    ...meta,
+    power: Math.round(240 + dc.carbon_intensity_gco2_per_kwh / 3),
+    carbonIntensity: dc.carbon_intensity_gco2_per_kwh,
+    cost: dc.energy_cost_per_kwh,
+    latency: dc.latency_ms,
+  };
+}
+
+async function apiGet<T>(path: string): Promise<T> {
+  const res = await fetch(`${BACKEND_URL}${path}`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`GET ${path} failed (${res.status})`);
+  }
+  return (await res.json()) as T;
+}
+
+async function apiPost<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BACKEND_URL}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const message = await res.text();
+    throw new Error(`POST ${path} failed (${res.status}): ${message}`);
+  }
+
+  return (await res.json()) as T;
+}
+
+export async function loadDatacenters(): Promise<Datacenter[]> {
+  const data = await apiGet<{ datacenters: BackendDatacenter[] }>("/datacenters");
+  return data.datacenters.map(mapBackendDatacenter);
+}
+
+export async function routeWorkload(params: {
+  model: string;
+  priority: Priority;
+  latencyLimit: number;
+  nodes: Datacenter[];
+}): Promise<{ decision: Decision; jobId: string; status: JobStatus }> {
+  const spec = inferWorkload(params.model);
+  const payload = {
+    job_id: `job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    cpu: spec.cpu,
+    gpu: spec.gpu,
+    ram: spec.ram,
+    deadline: params.latencyLimit,
+    priority: params.priority,
+  };
+
+  const scheduled = await apiPost<ScheduleResponse>("/schedule", payload);
+  return {
+    jobId: scheduled.job_id,
+    status: scheduled.status,
+    decision: buildDecision(params.nodes, scheduled.assigned_dc, spec),
+  };
+}
+
+export async function loadJob(jobId: string): Promise<JobSnapshot> {
+  const data = await apiGet<JobResponse>(`/jobs/${jobId}`);
+  return {
+    jobId: data.job.job_id,
+    status: data.job.status,
+    assignedDc: data.job.assigned_dc,
+    runtimeS: data.job.runtime_s,
+    energyKwh: data.job.energy_kwh,
+    carbonKg: data.job.carbon_kg,
+    failureReason: data.job.failure_reason,
+  };
+}
+
+export async function loadEvents(
+  since: number
+): Promise<{ events: JobEvent[]; lastEventId: number }> {
+  const data = await apiGet<EventsResponse>(`/events?since=${since}`);
+  return {
+    events: data.events.map((event) => ({
+      eventId: event.event_id,
+      eventType: event.event_type,
+      timestamp: event.timestamp,
+      jobId: event.payload.job_id ?? null,
+      status: event.payload.status ?? null,
+      assignedDc: event.payload.assigned_dc ?? null,
+      reason: event.payload.reason ?? null,
+      runtimeS: event.payload.runtime_s ?? null,
+    })),
+    lastEventId: data.last_event_id,
+  };
+}
+
+export const DATACENTERS = FALLBACK_DATACENTERS;

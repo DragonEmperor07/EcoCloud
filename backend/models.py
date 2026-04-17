@@ -6,7 +6,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
-Priority = Literal["low", "medium", "high"]
+Priority = Literal["low", "medium", "high", "low_cost", "low_carbon", "balanced"]
 JobStatus = Literal["queued", "scheduled", "running", "completed", "failed"]
 
 
@@ -63,4 +63,3 @@ class Event(BaseModel):
     event_type: str
     timestamp: datetime = Field(default_factory=utc_now)
     payload: dict
-

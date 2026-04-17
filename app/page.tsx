@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 
 import ControlPanel from "./components/ControlPanel";
@@ -9,8 +9,14 @@ import NodeList from "./components/NodeList";
 import {
   DATACENTERS,
   ORIGIN,
-  decide,
+  loadDatacenters,
+  loadEvents,
+  loadJob,
+  routeWorkload,
+  type Datacenter,
   type Decision,
+  type JobEvent,
+  type JobStatus,
   type Priority,
 } from "./lib/datacenters";
 
@@ -28,11 +34,116 @@ const Globe = dynamic(() => import("./components/Globe"), {
 });
 
 export default function Page() {
+  const [nodes, setNodes] = useState<Datacenter[]>(DATACENTERS);
   const [decision, setDecision] = useState<Decision | null>(null);
   const [isDeploying, setDeploying] = useState(false);
   const [activeModel, setActiveModel] = useState<string>("");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<JobStatus | "idle" | "scheduling">("idle");
+  const [jobRuntimeS, setJobRuntimeS] = useState<number | null>(null);
+  const [jobFailureReason, setJobFailureReason] = useState<string | null>(null);
+  const [jobTimeline, setJobTimeline] = useState<JobEvent[]>([]);
+  const [eventCursor, setEventCursor] = useState(0);
 
-  const handleDeploy = ({
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const liveNodes = await loadDatacenters();
+        if (!cancelled && liveNodes.length > 0) {
+          setNodes(liveNodes);
+          setLoadError(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setLoadError("Backend is unavailable. Showing fallback grid data.");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!activeJobId) {
+      return;
+    }
+    if (!["queued", "scheduled", "running"].includes(jobStatus)) {
+      return;
+    }
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const job = await loadJob(activeJobId);
+        if (cancelled) return;
+        setJobStatus(job.status);
+        setJobRuntimeS(job.runtimeS);
+        setJobFailureReason(job.failureReason);
+      } catch {
+        // Quietly ignore transient polling failures.
+      }
+    };
+
+    void poll();
+    const timer = setInterval(() => {
+      void poll();
+    }, 1500);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [activeJobId, jobStatus]);
+
+  useEffect(() => {
+    if (!activeJobId) {
+      return;
+    }
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const batch = await loadEvents(eventCursor);
+        if (cancelled) return;
+
+        if (batch.lastEventId !== eventCursor) {
+          setEventCursor(batch.lastEventId);
+        }
+
+        const relevant = batch.events.filter((event) => event.jobId === activeJobId);
+        if (relevant.length === 0) {
+          return;
+        }
+
+        setJobTimeline((prev) => {
+          const seen = new Set(prev.map((event) => event.eventId));
+          const next = [...prev];
+          for (const event of relevant) {
+            if (!seen.has(event.eventId)) {
+              next.push(event);
+            }
+          }
+          return next.slice(-8);
+        });
+      } catch {
+        // Quietly ignore transient polling failures.
+      }
+    };
+
+    void poll();
+    const timer = setInterval(() => {
+      void poll();
+    }, 1500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [activeJobId, eventCursor]);
+
+  const handleDeploy = async ({
     model,
     priority,
     latencyLimit,
@@ -43,21 +154,42 @@ export default function Page() {
   }) => {
     setDeploying(true);
     setActiveModel(model);
-    // Simulate the routing decision with a brief, intentional pause so the
-    // arc + ring animation has a chance to read as "thinking".
-    setTimeout(() => {
-      setDecision(decide(priority, latencyLimit));
+    setActiveJobId(null);
+    setJobStatus("scheduling");
+    setJobRuntimeS(null);
+    setJobFailureReason(null);
+    setJobTimeline([]);
+    setEventCursor(0);
+    try {
+      const routed = await routeWorkload({
+        model,
+        priority,
+        latencyLimit,
+        nodes,
+      });
+      setDecision(routed.decision);
+      setActiveJobId(routed.jobId);
+      setJobStatus(routed.status);
+      setLoadError(null);
+    } catch {
+      setLoadError("Failed to route workload. Make sure backend is running on port 8000.");
+      setJobStatus("failed");
+    } finally {
       setDeploying(false);
-    }, 850);
+    }
   };
 
   const optimalId = decision?.optimal.id ?? null;
   const baselineId = decision?.baseline.id ?? null;
 
-  const totalNodes = DATACENTERS.length;
+  const totalNodes = nodes.length;
   const cleanestG = useMemo(
-    () => Math.min(...DATACENTERS.map((d) => d.carbonIntensity)),
-    []
+    () => Math.min(...nodes.map((d) => d.carbonIntensity)),
+    [nodes]
+  );
+  const cleanestDc = useMemo(
+    () => [...nodes].sort((a, b) => a.carbonIntensity - b.carbonIntensity)[0],
+    [nodes]
   );
 
   return (
@@ -94,7 +226,7 @@ export default function Page() {
         <div className="flex items-center gap-2">
           <span className="pill">
             <span className="size-1.5 rounded-full bg-emerald-300 breath" />
-            Grid sync · 2m
+            {loadError ? "Fallback data" : "Backend live"}
           </span>
           <button className="btn-ghost">
             <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
@@ -109,7 +241,12 @@ export default function Page() {
       {/* ───────── Stat strip ───────── */}
       <section className="relative z-10 px-8 pb-5 grid grid-cols-2 md:grid-cols-4 gap-3">
         <Stat label="Active regions" value={String(totalNodes)} sub="online · global" tone="leaf" />
-        <Stat label="Cleanest grid" value={`${cleanestG} g`} sub="CO₂ / kWh · Iceland" tone="aqua" />
+        <Stat
+          label="Cleanest grid"
+          value={`${cleanestG} g`}
+          sub={`CO₂ / kWh · ${cleanestDc?.city ?? "n/a"}`}
+          tone="aqua"
+        />
         <Stat
           label="Carbon avoided · 24h"
           value="412 kg"
@@ -129,8 +266,20 @@ export default function Page() {
         {/* Left column */}
         <div className="col-span-12 lg:col-span-3 flex flex-col gap-5">
           <ControlPanel onDeploy={handleDeploy} isDeploying={isDeploying} />
+          <JobStatusCard
+            jobId={activeJobId}
+            status={jobStatus}
+            runtimeS={jobRuntimeS}
+            failureReason={jobFailureReason}
+          />
+          <JobTimelineCard jobId={activeJobId} events={jobTimeline} />
+          {loadError && (
+            <div className="glass-soft px-3.5 py-2.5 text-[11px] text-amber-300">
+              {loadError}
+            </div>
+          )}
           <NodeList
-            nodes={DATACENTERS}
+            nodes={nodes}
             optimalId={optimalId}
             baselineId={baselineId}
           />
@@ -164,7 +313,7 @@ export default function Page() {
             <div className="absolute inset-0">
               <Globe
                 origin={ORIGIN}
-                nodes={DATACENTERS}
+                nodes={nodes}
                 optimalId={optimalId}
                 baselineId={baselineId}
               />
@@ -295,6 +444,137 @@ function Mini({
 
 function Divider() {
   return <span className="h-7 w-px bg-white/10" />;
+}
+
+function JobStatusCard({
+  jobId,
+  status,
+  runtimeS,
+  failureReason,
+}: {
+  jobId: string | null;
+  status: JobStatus | "idle" | "scheduling";
+  runtimeS: number | null;
+  failureReason: string | null;
+}) {
+  const label =
+    status === "idle"
+      ? "No active job"
+      : status === "scheduling"
+      ? "Scheduling..."
+      : status === "queued"
+      ? "Queued"
+      : status === "scheduled"
+      ? "Scheduled"
+      : status === "running"
+      ? "Running"
+      : status === "completed"
+      ? "Completed"
+      : "Failed";
+
+  const toneClass =
+    status === "completed"
+      ? "text-emerald-300"
+      : status === "failed"
+      ? "text-rose-300"
+      : "text-cyan-300";
+
+  return (
+    <section className="glass-soft px-3.5 py-3 flex flex-col gap-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="eyebrow">Job status</span>
+        <span className={`text-[12px] numeric ${toneClass}`}>{label}</span>
+      </div>
+      <span className="text-[11px] text-[color:var(--ink-mute)] truncate">
+        {jobId ? `ID: ${jobId}` : "Route a workload to start tracking."}
+      </span>
+      {status === "completed" && runtimeS !== null && (
+        <span className="text-[11px] text-emerald-300">Runtime: {runtimeS}s</span>
+      )}
+      {status === "failed" && failureReason && (
+        <span className="text-[11px] text-rose-300">Reason: {failureReason}</span>
+      )}
+    </section>
+  );
+}
+
+function JobTimelineCard({
+  jobId,
+  events,
+}: {
+  jobId: string | null;
+  events: JobEvent[];
+}) {
+  const eventLabel: Record<string, string> = {
+    job_received: "Job received",
+    job_scheduled: "Scheduled",
+    job_running: "Running",
+    job_completed: "Completed",
+    job_rejected: "Rejected",
+  };
+
+  const toneFor = (type: string) => {
+    if (type === "job_completed") return "text-emerald-300";
+    if (type === "job_rejected") return "text-rose-300";
+    if (type === "job_running") return "text-cyan-300";
+    return "text-[color:var(--ink-soft)]";
+  };
+  const dotFor = (type: string) => {
+    if (type === "job_completed") return "bg-emerald-300";
+    if (type === "job_rejected") return "bg-rose-300";
+    if (type === "job_running") return "bg-cyan-300";
+    return "bg-[color:var(--ink-soft)]";
+  };
+
+  return (
+    <section className="glass-soft px-3.5 py-3 flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <span className="eyebrow">Timeline</span>
+        <span className="text-[10.5px] text-[color:var(--ink-mute)]">
+          {events.length} events
+        </span>
+      </div>
+      {!jobId && (
+        <span className="text-[11px] text-[color:var(--ink-mute)]">
+          Start a route to see live event flow.
+        </span>
+      )}
+      {jobId && events.length === 0 && (
+        <span className="text-[11px] text-cyan-300">Waiting for backend events…</span>
+      )}
+      {events.length > 0 && (
+        <ul className="flex flex-col gap-2">
+          {events.map((event) => (
+            <li
+              key={event.eventId}
+              className="flex items-start gap-2.5 text-[11px] leading-snug"
+            >
+              <span className={`mt-1 size-1.5 rounded-full ${dotFor(event.eventType)}`} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className={toneFor(event.eventType)}>
+                    {eventLabel[event.eventType] ?? event.eventType}
+                  </span>
+                  <span className="text-[10px] text-[color:var(--ink-mute)] numeric">
+                    {new Date(event.timestamp).toLocaleTimeString()}
+                  </span>
+                </div>
+                {(event.assignedDc || event.reason || event.runtimeS !== null) && (
+                  <span className="text-[10.5px] text-[color:var(--ink-mute)]">
+                    {event.assignedDc
+                      ? `dc: ${event.assignedDc}`
+                      : event.reason
+                      ? `reason: ${event.reason}`
+                      : `runtime: ${event.runtimeS}s`}
+                  </span>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
 }
 
 function EnvCard() {
