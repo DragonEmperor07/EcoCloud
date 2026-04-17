@@ -25,7 +25,7 @@ export default function Hero({ username, onUsername, onContinue }: Props) {
       <header className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-10 pt-7">
         <div className="flex items-center gap-3">
           <span className="size-9 rounded-xl overflow-hidden bg-[#0c1530] grid place-items-center ring-1 ring-white/10">
-            <Image src="/logo.png" alt="EcoCloud" width={36} height={36} className="object-contain" />
+            <Image src="/logo.png" alt="EcoCloud" width={36} height={36} className="object-contain" loading="eager" />
           </span>
           <span className="text-[15px] font-semibold tracking-[0.18em] text-white/85">
             ECOCLOUD
